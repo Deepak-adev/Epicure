@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,26 +10,36 @@
             font-family: Arial, sans-serif;
             background-color: black;
             color: white;
-            text-align: center;
             margin: 0;
             padding: 0;
         }
         .container {
-            max-width: 500px;
+            max-width: 800px;
             margin: 50px auto;
             padding: 20px;
+        }
+        .card {
             background: #1e1e1e;
             border-radius: 10px;
             box-shadow: 0 0 15px rgba(26, 118, 209, 0.5);
+            margin-bottom: 20px;
+            padding: 20px;
         }
         h2 {
             color: #1A76D1;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .upload-section {
+            text-align: center;
+            margin-bottom: 30px;
         }
         label {
             font-size: 16px;
             font-weight: bold;
             display: block;
             margin: 10px 0;
+            color: #1A76D1;
         }
         input {
             width: 100%;
@@ -41,8 +52,7 @@
             font-size: 14px;
         }
         button {
-            width: 100%;
-            padding: 12px;
+            padding: 12px 25px;
             background: #1A76D1;
             color: white;
             border: none;
@@ -50,27 +60,144 @@
             border-radius: 5px;
             font-size: 16px;
             transition: 0.3s ease;
+            margin: 5px;
         }
         button:hover {
             background: #155a9a;
+        }
+        .results-section {
+            display: none;
+            margin-top: 30px;
+        }
+        .prediction-item {
+            background: #333;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #1A76D1;
+        }
+        .prediction-item h3 {
+            margin: 0;
+            color: #1A76D1;
+        }
+        .confidence-bar {
+            width: 100%;
+            height: 10px;
+            background: #444;
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+        .confidence-fill {
+            height: 100%;
+            background: #1A76D1;
+            transition: width 0.3s ease;
+        }
+        .confidence-text {
+            font-size: 14px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .button-group {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #1A76D1;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .error-message {
+            color: #ff4444;
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(255, 68, 68, 0.1);
+            border-radius: 5px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>🩺 Skin Disease Report Generator</h2>
-        <form id="reportForm" enctype="multipart/form-data">
-            {% csrf_token %}
-            <label for="image">Upload Image:</label>
-            <input type="file" id="image" name="image" accept="image/*" required>
-            <button type="submit">Generate Report</button>
-        </form>
+        
+        <!-- Upload Section -->
+        <div class="card upload-section">
+            <form id="reportForm" enctype="multipart/form-data">
+                {% csrf_token %}
+                <label for="image">Upload Image:</label>
+                <input type="file" id="image" name="image" accept="image/*" required>
+                <button type="submit">Analyze Image</button>
+            </form>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="loading"></div>
+
+        <!-- Error Message -->
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="results-section">
+            <div class="card">
+                <h3>Analysis Results</h3>
+                <div id="resultsContent">
+                    <!-- Results will be inserted here -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+        }
+
+        function displayResults(data) {
+            const resultsContent = document.getElementById('resultsContent');
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.style.display = 'none';
+
+            let html = `
+                <div class="prediction-item">
+                    <h3>Predicted Disease: ${data.predicted_class}</h3>
+                </div>
+                <div class="button-group">
+                    <form action="{% url 'download_pdf' %}" method="post">
+                        {% csrf_token %}
+                        <button type="submit">Generate PDF Report</button>
+                    </form>
+                </div>
+            `;
+
+            resultsContent.innerHTML = html;
+            document.getElementById('resultsSection').style.display = 'block';
+        }
+
         document.getElementById("reportForm").addEventListener("submit", function(event) {
             event.preventDefault();
-
+            
+            // Show loading indicator and hide other sections
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+            
             let formData = new FormData(this);
 
             fetch("{% url 'generate_skin_report' %}", {
@@ -82,22 +209,25 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error("Failed to generate report.");
+                    return response.json().then(data => {
+                        throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                    });
                 }
-                return response.blob();
+                return response.json();
             })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = "skin_disease_report.pdf";
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.error || 'Failed to analyze image');
+                }
+                displayResults(data);
             })
             .catch(error => {
                 console.error("Error:", error);
-                alert("Failed to generate report.");
+                showError(error.message || "Failed to analyze image. Please try again.");
+            })
+            .finally(() => {
+                // Hide loading indicator
+                document.getElementById('loading').style.display = 'none';
             });
         });
     </script>
