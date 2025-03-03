@@ -78,54 +78,97 @@ def generate_skin_report(request):
                 predictions = model.predict(image_array)
                 predicted_class = disease_classes[np.argmax(predictions)]
                 
-                # Generate treatment plan using Gemini API
-                prompt = (
-                    f"Provide a comprehensive analysis for {predicted_class} with the following sections:\n\n"
-                    f"1. Disease Overview:\n"
-                    f"- Brief description of the condition\n"
-                    f"- Common symptoms\n"
-                    f"- Typical causes\n\n"
-                    f"2. Disease Stage Assessment:\n"
-                    f"- Possible stages of this condition\n"
-                    f"- General characteristics of early stages (Stage 1-2)\n"
-                    f"- Warning signs for advanced stages\n\n"
-                    f"3. Treatment Options:\n"
-                    f"- Recommended medications (for early stages)\n"
-                    f"- Treatment procedures\n"
-                    f"- Estimated treatment duration\n\n"
-                    f"4. Medical Consultation:\n"
-                    f"- Type of specialists to consult\n"
-                    f"- When to seek immediate medical attention\n\n"
-                    f"5. Home Care and Prevention:\n"
-                    f"- Self-care measures\n"
-                    f"- Lifestyle modifications\n"
-                    f"- Prevention strategies\n\n"
-                    f"Format with clear headings and bullet points. Be specific about medications and specialists."
-                )
+                # Update the Gemini prompt to ensure structured response
+                prompt = f"""
+                Create a comprehensive medical analysis report for {predicted_class} using exactly this structure:
+
+                1. DISEASE OVERVIEW:
+                Basic Information:
+                - Full name of the condition
+                - Type of skin condition
+                - Areas typically affected
+
+                Common Symptoms:
+                - Primary symptoms
+                - Secondary symptoms
+                - Visual characteristics
+
+                Risk Factors:
+                - Age groups most affected
+                - Environmental factors
+                - Genetic predisposition
+
+                2. DISEASE STAGE ASSESSMENT:
+                Early Stage Indicators:
+                - Initial symptoms
+                - Typical timeline
+                - Early warning signs
+
+                Progressive Stage Signs:
+                - Advanced symptoms
+                - Complications
+                - Risk factors for progression
+
+                3. TREATMENT RECOMMENDATIONS:
+                Medications:
+                - Over-the-counter options
+                - Prescription medications
+                - Topical treatments
+
+                Medical Procedures:
+                - Primary treatment options
+                - Alternative therapies
+                - Expected outcomes
+
+                Treatment Timeline:
+                - Initial treatment phase
+                - Expected duration
+                - Follow-up requirements
+
+                4. HOME CARE PROTOCOL:
+                Daily Skin Care:
+                - Cleaning routine
+                - Moisturizing recommendations
+                - Sun protection measures
+
+                Lifestyle Modifications:
+                - Dietary recommendations
+                - Activity restrictions
+                - Environmental considerations
+
+                5. MEDICAL CONSULTATION:
+                Specialist Referral:
+                - Type of specialist needed
+                - When to seek immediate care
+                - Required medical tests
+
+                Follow-up Care:
+                - Appointment frequency
+                - Monitoring requirements
+                - Progress indicators
+
+                Please maintain this exact structure with main sections (1-5) and subsections. Use bullet points for all details.
+                """
 
                 gemini_model = genai.GenerativeModel("gemini-1.5-flash")
                 response = gemini_model.generate_content(prompt)
                 recommendations = response.text if hasattr(response, "text") else "No response generated."
                 
-                # Remove Markdown-style formatting
-                cleaned_recommendations = re.sub(r"\*\*(.*?)\*\*", r"\1", recommendations)
-
                 # Store in session
                 request.session['predicted_class'] = predicted_class
-                request.session['recommendations'] = cleaned_recommendations
+                request.session['recommendations'] = recommendations
 
-                # Return JSON response with empty array for disease_predictions to prevent frontend errors
                 return JsonResponse({
                     'success': True,
                     'predicted_class': predicted_class,
-                    'recommendations': cleaned_recommendations,
-                    'disease_predictions': []  # Add this empty array to prevent frontend errors
+                    'recommendations': recommendations,
+                    'disease_predictions': []
                 })
 
             except Exception as e:
                 return JsonResponse({
                     'success': False,
-                    'error': f"Error during prediction: {str(e)}"
+                    'error': f"Error during analysis: {str(e)}"
                 }, status=500)
 
         except Exception as e:
@@ -166,6 +209,8 @@ def download_pdf(request):
 
             # Enhanced Styles
             styles = getSampleStyleSheet()
+            
+            # Main Title
             styles.add(ParagraphStyle(
                 name='ReportTitle',
                 parent=styles['Heading1'],
@@ -174,9 +219,10 @@ def download_pdf(request):
                 spaceAfter=30,
                 alignment=1
             ))
-            
+
+            # Main Section Headers (1-5)
             styles.add(ParagraphStyle(
-                name='ReportSection',
+                name='MainSection',
                 parent=styles['Heading2'],
                 fontSize=16,
                 textColor=colors.white,
@@ -184,201 +230,131 @@ def download_pdf(request):
                 spaceBefore=15,
                 spaceAfter=15,
                 padding=10,
-                borderRadius=5,
                 alignment=0
             ))
 
+            # Subsection Headers
             styles.add(ParagraphStyle(
-                name='ReportSubHeader',
+                name='SubSection',
                 parent=styles['Heading3'],
                 fontSize=14,
                 textColor=colors.HexColor('#1A76D1'),
-                spaceBefore=15,
-                spaceAfter=10,
-                borderBottom=1,
-                borderColor=colors.HexColor('#1A76D1')
+                spaceBefore=12,
+                spaceAfter=8,
+                leftIndent=10
             ))
 
+            # Content Text
             styles.add(ParagraphStyle(
-                name='ReportContent',
+                name='ContentText',
                 parent=styles['Normal'],
                 fontSize=11,
                 textColor=colors.HexColor('#333333'),
                 spaceBefore=6,
                 spaceAfter=6,
-                leftIndent=20
-            ))
-
-            # Add new styles for boxes and highlights
-            styles.add(ParagraphStyle(
-                name='WarningText',
-                parent=styles['Normal'],
-                fontSize=12,
-                textColor=colors.HexColor('#CC0000'),
-                backColor=colors.HexColor('#FFE8E8'),
-                borderColor=colors.HexColor('#CC0000'),
-                borderWidth=1,
-                borderPadding=8,
-                spaceBefore=10,
-                spaceAfter=10
+                leftIndent=30
             ))
 
             # Build PDF content
             elements = []
 
-            # Title and Date
+            # Title and Header
             elements.append(Paragraph("Skin Disease Analysis Report", styles['ReportTitle']))
-            
-            # Date and Reference
+
+            # Info Box
             from datetime import datetime
             date_str = datetime.now().strftime("%B %d, %Y")
             ref_number = datetime.now().strftime("REF-%Y%m%d-%H%M%S")
             
-            info_data = [
+            info_table = Table([
                 [Paragraph(f"<b>Date:</b> {date_str}", styles['Normal']),
-                 Paragraph(f"<b>Reference:</b> {ref_number}", styles['Normal'])]
-            ]
-            info_table = Table(info_data, colWidths=[3*inch, 3*inch])
+                 Paragraph(f"<b>Reference:</b> {ref_number}", styles['Normal'])],
+                [Paragraph(f"<b>Diagnosed Condition:</b> {predicted_class}", styles['Normal']),
+                 Paragraph("<b>Report Type:</b> Detailed Analysis", styles['Normal'])]
+            ], colWidths=[3*inch, 3*inch])
+            
             info_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F0F7FF')),
                 ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#1A76D1')),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#1A76D1')),
                 ('PADDING', (0, 0), (-1, -1), 10),
             ]))
             elements.append(info_table)
             elements.append(Spacer(1, 20))
 
-            # Diagnosis Box
-            diagnosis_table = Table([
-                [Paragraph("<b>DIAGNOSIS</b>", styles['ReportSection'])],
-                [Paragraph(f"<b>Identified Condition:</b> {predicted_class}", 
-                          ParagraphStyle(
-                              'DiagnosisText',
-                              parent=styles['Normal'],
-                              fontSize=14,
-                              textColor=colors.HexColor('#333333'),
-                              spaceBefore=10,
-                              spaceAfter=10,
-                              leftIndent=10
-                          ))]
-            ], colWidths=[7*inch])
-            
-            diagnosis_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F0F7FF')),
-                ('BOX', (0, 1), (-1, -1), 1, colors.HexColor('#1A76D1')),
-                ('PADDING', (0, 0), (-1, -1), 10),
-            ]))
-            elements.append(diagnosis_table)
-            elements.append(Spacer(1, 20))
+            # Process recommendations into structured sections
+            main_sections = {
+                "1. DISEASE OVERVIEW": ["Basic Information", "Common Symptoms", "Risk Factors"],
+                "2. DISEASE STAGE ASSESSMENT": ["Early Stage Indicators", "Progressive Stage Signs"],
+                "3. TREATMENT RECOMMENDATIONS": ["Medications", "Medical Procedures", "Treatment Timeline"],
+                "4. HOME CARE PROTOCOL": ["Daily Skin Care", "Lifestyle Modifications"],
+                "5. MEDICAL CONSULTATION": ["Specialist Referral", "Follow-up Care"]
+            }
 
-            # Add Disease Information Section
-            elements.append(Paragraph("DISEASE INFORMATION", styles['ReportSection']))
-            
-            # Process disease overview
-            sections = recommendations.split('\n\n')
-            current_section = ""
-            
-            for section in sections:
-                if ':' in section.split('\n')[0]:
-                    heading, content = section.split(':', 1)
-                    heading = heading.strip()
-                    
-                    # Style different sections appropriately
-                    if "Disease Overview" in heading:
-                        elements.append(Paragraph(heading, styles['ReportSubHeader']))
-                        elements.append(Paragraph(content.strip(), styles['ReportContent']))
-                        elements.append(Spacer(1, 10))
-                    
-                    elif "Disease Stage" in heading:
-                        elements.append(Paragraph(heading, styles['ReportSubHeader']))
-                        stage_content = content.strip()
-                        elements.append(Paragraph(stage_content, styles['ReportContent']))
-                        
-                        # Add warning box for advanced stages
-                        warning_text = (
-                            "<b>Important Notice:</b> If you notice signs of advanced stages, "
-                            "please seek immediate medical attention."
-                        )
-                        elements.append(Paragraph(warning_text, styles['WarningText']))
-                        elements.append(Spacer(1, 10))
-                    
-                    elif "Treatment Options" in heading:
-                        elements.append(Paragraph(heading, styles['ReportSubHeader']))
-                        
-                        # Create a treatment table
-                        treatment_lines = content.strip().split('\n')
-                        treatment_data = [[Paragraph("<b>Treatment Type</b>", styles['ReportContent']), 
-                                         Paragraph("<b>Details</b>", styles['ReportContent'])]]
-                        
-                        for line in treatment_lines:
-                            if line.strip():
-                                if ':' in line:
-                                    type_, detail = line.split(':', 1)
-                                    treatment_data.append([
-                                        Paragraph(type_.strip(), styles['ReportContent']),
-                                        Paragraph(detail.strip(), styles['ReportContent'])
-                                    ])
-                        
-                        treatment_table = Table(treatment_data, colWidths=[2*inch, 5*inch])
-                        treatment_table.setStyle(TableStyle([
-                            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F0F7FF')),
-                            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#1A76D1')),
-                            ('PADDING', (0, 0), (-1, -1), 6),
-                        ]))
-                        elements.append(treatment_table)
-                        elements.append(Spacer(1, 10))
-                    
-                    elif "Medical Consultation" in heading:
-                        elements.append(Paragraph(heading, styles['ReportSubHeader']))
-                        
-                        # Format specialist information
-                        specialist_info = content.strip().split('\n')
-                        for info in specialist_info:
-                            if info.strip():
-                                elements.append(Paragraph(f"• {info.strip()}", styles['ReportContent']))
-                        elements.append(Spacer(1, 10))
-                    
-                    elif "Home Care and Prevention" in heading:
-                        elements.append(Paragraph(heading, styles['ReportSubHeader']))
-                        care_lines = content.strip().split('\n')
-                        for line in care_lines:
-                            if line.strip():
-                                elements.append(Paragraph(f"• {line.strip()}", styles['ReportContent']))
-                        elements.append(Spacer(1, 15))
+            # Split content and process
+            lines = recommendations.strip().split('\n')
+            current_main_section = None
+            current_sub_section = None
+            content_buffer = []
 
-            # Add a Quick Reference Box
-            quick_ref_data = [
-                [Paragraph("<b>QUICK REFERENCE</b>", styles['ReportSection'])],
-                [Paragraph(
-                    "<b>Key Actions:</b><br/>"
-                    "1. Consult recommended specialists<br/>"
-                    "2. Follow prescribed medications<br/>"
-                    "3. Implement prevention measures<br/>"
-                    "4. Schedule regular check-ups",
-                    styles['ReportContent']
-                )]
-            ]
-            quick_ref_table = Table(quick_ref_data, colWidths=[7*inch])
-            quick_ref_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F0F7FF')),
-                ('BOX', (0, 1), (-1, -1), 1, colors.HexColor('#1A76D1')),
-                ('PADDING', (0, 0), (-1, -1), 10),
-            ]))
-            elements.append(quick_ref_table)
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
 
-            # Footer with disclaimer
+                # Check if this is a main section
+                if any(section in line for section in main_sections.keys()):
+                    # Add previous section content if exists
+                    if content_buffer:
+                        for content in content_buffer:
+                            elements.append(Paragraph(f"• {content}", styles['ContentText']))
+                        content_buffer = []
+
+                    current_main_section = line.strip()
+                    elements.append(Paragraph(current_main_section, styles['MainSection']))
+                    continue
+
+                # Check if this is a subsection
+                if current_main_section and any(sub in line for section in main_sections.values() for sub in section):
+                    # Add previous subsection content if exists
+                    if content_buffer:
+                        for content in content_buffer:
+                            elements.append(Paragraph(f"• {content}", styles['ContentText']))
+                        content_buffer = []
+
+                    current_sub_section = line.strip(':')
+                    elements.append(Paragraph(current_sub_section, styles['SubSection']))
+                    continue
+
+                # Add content to buffer
+                if line.startswith(('•', '-')):
+                    line = line.lstrip('•- ').strip()
+                if line:
+                    content_buffer.append(line)
+
+            # Add any remaining content
+            if content_buffer:
+                for content in content_buffer:
+                    elements.append(Paragraph(f"• {content}", styles['ContentText']))
+
+            # Footer
             elements.append(Spacer(1, 30))
             footer_style = ParagraphStyle(
-                'Footer',
+                'ReportFooter',
                 parent=styles['Normal'],
                 fontSize=8,
                 textColor=colors.gray,
                 alignment=1
             )
             footer_text = """
-                This report is generated automatically using AI analysis. 
-                Please consult with a healthcare professional for accurate diagnosis and treatment.
-                <br/>
-                Generated by Skin Disease Analysis System
+                <para alignment="center">
+                    This report is generated automatically using AI analysis.
+                    Please consult with a healthcare professional for accurate diagnosis and treatment.
+                    <br/><br/>
+                    Generated by Skin Disease Analysis System
+                    <br/>
+                    Page 1
+                </para>
             """
             elements.append(Paragraph(footer_text, footer_style))
 
